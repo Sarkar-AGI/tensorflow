@@ -4180,6 +4180,7 @@ cc_library(
         ":matmul_indexing_utils",
         ":shape_inference",
         ":source_target_pairs",
+        "//third_party/gloop/util/status:ret_check",
         "//xla:comparison_util",
         "//xla:permutation_util",
         "//xla:shape_layout",
