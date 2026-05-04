@@ -2814,6 +2814,7 @@ def MHLO_CustomCallOp: MHLO_Op<"custom_call",
     DefaultValuedOptionalAttr<MHLO_CustomCallScheduleAttr, "::mlir::mhlo::CustomCallSchedule::NONE">:$custom_call_schedule,
     OptionalAttr<MHLO_ArrayOfLayoutAttr>:$operand_layouts,
     OptionalAttr<MHLO_ArrayOfLayoutAttr>:$result_layouts,
+    OptionalAttr<MHLO_ArrayOfTilingAttr>:$result_tilings,
     DefaultValuedOptionalAttr<
         TypedArrayAttrBase<
             MHLO_OutputOperandAlias,
@@ -2835,7 +2836,8 @@ def MHLO_CustomCallOp: MHLO_Op<"custom_call",
       "::mlir::mhlo::CustomCallApiVersionAttr":$api_version,
       "::mlir::ArrayAttr":$called_computations,
       "::mlir::ArrayAttr":$operand_layouts,
-      "::mlir::ArrayAttr":$result_layouts)>];
+      "::mlir::ArrayAttr":$result_layouts,
+      "::mlir::ArrayAttr":$result_tilings)>];
 
   let assemblyFormat = [{
     custom<CustomCallTarget>($call_target_name) `(` $inputs `)`
