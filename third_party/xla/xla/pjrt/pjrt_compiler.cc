@@ -36,8 +36,6 @@ limitations under the License.
 #include "xla/pjrt/maybe_owning_mlir_module.h"
 #include "xla/pjrt/pjrt_executable.h"
 #include "xla/pjrt/proto/pjrt_partial_program.pb.h"
-#include "xla/tsl/platform/errors.h"
-#include "xla/tsl/platform/statusor.h"
 
 namespace xla {
 
@@ -49,8 +47,7 @@ PjRtCompilerRegistry& PjRtCompilerRegistry::Global() {
 absl::Status PjRtCompilerRegistry::RegisterFactory(
     absl::string_view platform_name, absl::string_view variant_name,
     PjRtCompilerFactory factory) {
-  std::pair<std::string, std::string> key{std::string(platform_name),
-                                          std::string(variant_name)};
+  CompilerType key{platform_name, variant_name};
   absl::MutexLock l(factory_mutex_);
   if (factories_.contains(key)) {
     return absl::AlreadyExistsError(
@@ -67,8 +64,7 @@ absl::Status PjRtCompilerRegistry::RegisterCompiler(
   if (compiler == nullptr) {
     return absl::InvalidArgumentError("Compiler cannot be null");
   }
-  std::pair<std::string, std::string> key{std::string(platform_name),
-                                          std::string(variant_name)};
+  CompilerType key{platform_name, variant_name};
   absl::MutexLock l(compiler_mutex_);
   if (compilers_.contains(key)) {
     return absl::AlreadyExistsError(absl::StrCat(
@@ -82,8 +78,7 @@ absl::Status PjRtCompilerRegistry::RegisterCompiler(
 absl::StatusOr<PjRtCompiler*> PjRtCompilerRegistry::GetOrCreateCompiler(
     absl::string_view platform_name, absl::string_view variant_name)
     ABSL_LOCKS_EXCLUDED(compiler_mutex_, factory_mutex_) {
-  std::pair<std::string, std::string> key{std::string(platform_name),
-                                          std::string(variant_name)};
+  CompilerType key{platform_name, variant_name};
 
   // Check if compiler has already existed in the compiler registry.
   {
@@ -136,16 +131,17 @@ absl::Status PjRtCompilerRegistry::InitializeVariant(
 }
 
 absl::Status PjRtCompilerRegistry::InitializeAllVariants() {
-  std::vector<std::pair<std::string, std::string>> keys;
+  std::vector<CompilerType> keys;
   {
     absl::MutexLock l(factory_mutex_);
+    keys.reserve(factories_.size());
     for (const auto& [key, factory] : factories_) {
       keys.push_back(key);
     }
   }
 
   for (const auto& key : keys) {
-    RETURN_IF_ERROR(InitializeVariant(key.first, key.second));
+    RETURN_IF_ERROR(InitializeVariant(key.platform_name, key.variant_name));
   }
   return absl::OkStatus();
 }
