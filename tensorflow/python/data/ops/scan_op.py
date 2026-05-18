@@ -73,8 +73,21 @@ class _ScanDataset(dataset_ops.UnaryDataset):
       old_state_classes = nest.map_structure(
           lambda component_spec: component_spec._to_legacy_output_classes(),  # pylint: disable=protected-access
           self._state_structure)
+
+      flat_new_state_classes = nest.flatten(new_state_classes)
+      flat_old_state_classes = nest.flatten(old_state_classes)
+      if len(flat_new_state_classes) != len(flat_old_state_classes):
+        raise TypeError(
+            "Invalid `scan_func`. The state returned by "
+            "`scan_func` must have the same number of elements "
+            "as the initial state. Expected "
+            f"{len(flat_old_state_classes)}, got "
+            f"{len(flat_new_state_classes)}."
+        )
+
       for new_state_class, old_state_class in zip(
-          nest.flatten(new_state_classes), nest.flatten(old_state_classes)):
+          flat_new_state_classes, flat_old_state_classes
+      ):
         if not issubclass(new_state_class, old_state_class):
           raise TypeError(f"Invalid `scan_func`. The element classes for the "
                           f"new state must match the initial state. Expected "
