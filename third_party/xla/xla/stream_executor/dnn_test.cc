@@ -55,6 +55,15 @@ TEST(DnnTest, VersionInfoComparisonOperators) {
   }
 }
 
+TEST(DnnTest, PoolingDescriptorSetDimOutOfBounds) {
+  EXPECT_DEATH(
+      {
+        dnn::PoolingDescriptor pool(1);
+        pool.set_window_height(1337);
+      },
+      "\\(1 vs\\. 1\\)");
+}
+
 TEST(DnnTest, ReorderDimsRankBelow2) {
   EXPECT_DEATH(dnn::ReorderDims({0}, dnn::DataLayout::kYXBatchDepth,
                                 dnn::DataLayout::kBatchYXDepth),

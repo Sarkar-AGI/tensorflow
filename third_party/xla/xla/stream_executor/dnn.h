@@ -35,6 +35,7 @@ limitations under the License.
 #include <vector>
 
 #include "google/protobuf/wrappers.pb.h"
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -72,10 +73,12 @@ std::vector<int64_t> ReorderDims(const std::vector<int64_t>& input,
 
 // Helper functions to make methods more readable.
 inline int64_t GetDim(absl::Span<const int64_t> data, DimIndex dim) {
+  CHECK_LT(static_cast<size_t>(dim), data.size());
   return data.rbegin()[static_cast<int64_t>(dim)];
 }
 
 inline void SetDim(absl::Span<int64_t> data, DimIndex dim, int64_t value) {
+  CHECK_LT(static_cast<size_t>(dim), data.size());
   data.rbegin()[static_cast<int64_t>(dim)] = value;
 }
 
