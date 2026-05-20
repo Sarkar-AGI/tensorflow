@@ -18,13 +18,15 @@ limitations under the License.
 
 #include <cstddef>
 
+#include "absl/base/nullability.h"
 #include "absl/log/check.h"
 #include "xla/stream_executor/tpu/c_api_decl.h"
 #include "tsl/platform/logging.h"  // IWYU pragma: keep
 
 extern "C" {
 
-void StreamExecutor_Tpu_FreeSerializedProto(const TpuSerializedProto* proto);
+void StreamExecutor_Tpu_FreeSerializedProto(
+    const TpuSerializedProto* absl_nonnull proto);
 
 }  // extern "C"
 
@@ -34,13 +36,24 @@ namespace tpu {
 using SerializedProto = TpuSerializedProto;
 
 // Serializes a `proto` and put the result in the given `SerializedProtoType*`
-// argument.
+// argument. Possible `SerializedProtoType` options include
+// `TpuSerializedProto`, `TpuExecutableSerializedProto`,
+// `CompilerMetadataSerializedProto`, `HostComputeMetadataSerializedProto`, and
+// `XLA_DeviceAssignment`.
+//
+// An empty proto is always represented as (bytes=nullptr, size=0).
+// There is no other valid way to represent it.
 //
 // Users should call SerializedProto_Free on `serialized_proto` afterwards.
 template <class ProtoType, class SerializedProtoType>
 inline void SerializeProto(const ProtoType& proto,
                            SerializedProtoType* serialized_proto) {
   auto size = proto.ByteSizeLong();
+  if (size == 0) {
+    serialized_proto->size = 0;
+    serialized_proto->bytes = nullptr;
+    return;
+  }
   auto bytes = new char[size];
   CHECK(proto.SerializeToArray(bytes, size));
   serialized_proto->size = size;
@@ -62,19 +75,14 @@ inline SerializedProto SerializeProto(const ProtoType& proto) {
 template <class ProtoType, class SerializedProtoType>
 inline ProtoType DeserializeProto(const SerializedProtoType& serialized_proto) {
   ProtoType proto;
-  if (serialized_proto.bytes != nullptr) {
-    CHECK_GT(serialized_proto.size, 0);
-    CHECK(proto.ParseFromArray(serialized_proto.bytes, serialized_proto.size))
-        << "Invalid buffer, failed to deserialize buffer.";
-  }
+  CHECK(proto.ParseFromArray(serialized_proto.bytes, serialized_proto.size))
+      << "Invalid buffer, failed to deserialize buffer.";
   return proto;
 }
 
 // Releases the memory allocated for serialized protos.
 template <class SerializedProtoType>
 inline void SerializedProto_Free(const SerializedProtoType& serialized_proto) {
-  CHECK_NE(serialized_proto.bytes, nullptr);
-  CHECK_GT(serialized_proto.size, 0);
   delete[] serialized_proto.bytes;
 }
 

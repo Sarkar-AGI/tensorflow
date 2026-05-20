@@ -33,6 +33,7 @@ limitations under the License.
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/stream_executor/tpu/c_api_decl.h"
+#include "xla/stream_executor/tpu/proto_helper.h"
 #include "xla/xla.pb.h"
 #include "xla/xla_data.pb.h"
 #include "tsl/platform/protobuf.h"
@@ -309,6 +310,21 @@ TEST(XlaHloModule, ToAndFromC) {
 
 // TODO(b/290654348): SE_DeviceAddressBase, SE_DeviceAddressAllocator,
 // SE_MaybeOwningDeviceAddress
+
+TEST(ProtoHelper, EmptyProto) {
+  xla::HloModuleProto empty_proto;
+  TpuSerializedProto serialized_proto =
+      stream_executor::tpu::SerializeProto(empty_proto);
+
+  EXPECT_EQ(serialized_proto.bytes, nullptr);
+  EXPECT_EQ(serialized_proto.size, 0);
+
+  xla::HloModuleProto deserialized_proto =
+      stream_executor::tpu::DeserializeProto<xla::HloModuleProto>(
+          serialized_proto);
+
+  stream_executor::tpu::SerializedProto_Free(serialized_proto);
+}
 
 }  // namespace
 
