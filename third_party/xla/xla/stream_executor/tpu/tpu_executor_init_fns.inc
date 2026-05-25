@@ -2,7 +2,7 @@ namespace {
 
 absl::Status SetExecutorStructFn(
     void* library_handle) {  // TENSORFLOW_STATUS_OK
-  auto* executor_fn = stream_executor::tpu::ExecutorApiFn();
+  TfTpu_ExecutorApiFn* executor_fn = stream_executor::tpu::ExecutorApiFn();
 
   TFTPU_SET_FN(executor_fn, TpuPlatform_New);
   TFTPU_SET_FN(executor_fn, TpuPlatform_Free);
@@ -140,6 +140,8 @@ absl::Status SetExecutorStructFn(
 
   TFTPU_SET_FN(executor_fn, TpuAsyncCollectiveOffloadHelper_Init);
   TFTPU_SET_FN(executor_fn, TpuAsyncCollectiveOffloadHelper_Shutdown);
+
+  TFTPU_SET_FN(executor_fn, TpuExecutor_DequeueOutfeedV2);
 
   return absl::OkStatus();
 }
