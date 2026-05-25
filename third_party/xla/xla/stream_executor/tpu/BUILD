@@ -697,3 +697,15 @@ cc_library(
         "@tsl//tsl/platform:types",
     ],
 )
+
+xla_cc_test(
+    name = "tpu_initialize_util_test",
+    srcs = ["tpu_initialize_util_test.cc"],
+    deps = [
+        ":tpu_initialize_util",
+        "//xla/tsl/platform:test",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest_main",
+    ],
+)

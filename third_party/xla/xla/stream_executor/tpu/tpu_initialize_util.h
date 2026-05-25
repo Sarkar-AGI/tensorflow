@@ -33,8 +33,15 @@ absl::Status TryAcquireTpuLock();  // TENSORFLOW_STATUS_OK
 // Returns arguments (e.g. flags) set in the LIBTPU_INIT_ARGS environment
 // variable. The first return value is the arguments, the second return value is
 // pointers to the arguments suitable for passing into the C API.
+// Note: The character pointers in the second vector point directly to the
+// underlying buffers of the strings in the first vector. Callers must ensure
+// that the string vector is not reassigned, reallocated, or destroyed while
+// using these pointers, as doing so will cause them to become dangling.
 std::pair<std::vector<std::string>, std::vector<const char*>>
 GetLibTpuInitArguments();
+
+// Test-only helper to reset external process lock and library load flags.
+void ResetTpuLockStateForTesting();
 
 }  // namespace tpu
 }  // namespace tensorflow

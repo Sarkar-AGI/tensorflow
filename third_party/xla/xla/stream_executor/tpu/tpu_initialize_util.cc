@@ -16,15 +16,14 @@ limitations under the License.
 #include "xla/stream_executor/tpu/tpu_initialize_util.h"
 
 #include <dirent.h>
-#include <dlfcn.h>
 #include <fcntl.h>
-#include <stdlib.h>
-#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -47,11 +46,21 @@ namespace tensorflow {
 namespace tpu {
 namespace {
 
-static std::string GetEnvVar(const char* name) {
+static bool libtpu_acquired = false;
+static int lock_fd = -1;
+
+absl::Mutex& GetTpuLockMutex() {
+  static absl::Mutex* const mu = new absl::Mutex();
+  return *mu;
+}
+
+std::string GetEnvVar(const char* name) {
   // Constructing a std::string directly from nullptr is undefined behavior so
   // we can return empty string in that case
   const char* env_value = getenv(name);
-  if (!env_value) return "";
+  if (env_value == nullptr) {
+    return "";
+  }
   return std::string(env_value);
 }
 
@@ -89,7 +98,7 @@ const char* GetTpuDriverFile() {
 bool IsTpuUsed(int64_t pid) {
   std::string fd_dir_path = absl::StrCat("/proc/", pid, "/fd");
   DIR* raw_fd_dir = opendir(fd_dir_path.c_str());
-  if (!raw_fd_dir) {
+  if (raw_fd_dir == nullptr) {
     return false;
   }
   std::unique_ptr<DIR, int (*)(DIR*)> fd_dir(raw_fd_dir, closedir);
@@ -102,7 +111,7 @@ bool IsTpuUsed(int64_t pid) {
   std::string fd_file_path = absl::StrCat(fd_dir_path, "/");
   size_t base_len = fd_file_path.size();
 
-  while ((ent = readdir(raw_fd_dir))) {
+  while ((ent = readdir(fd_dir.get()))) {
     absl::string_view d_name(ent->d_name);
 
     if (!absl::c_all_of(d_name, absl::ascii_isdigit)) {
@@ -137,7 +146,7 @@ absl::StatusOr<int64_t> FindLibtpuProcess() {
   }
   std::unique_ptr<DIR, int (*)(DIR*)> proc_dir(proc, closedir);
   struct dirent* ent;
-  while ((ent = readdir(proc))) {
+  while ((ent = readdir(proc_dir.get()))) {
     if (!absl::ascii_isdigit(*ent->d_name)) continue;
 
     int64_t pid;
@@ -149,16 +158,79 @@ absl::StatusOr<int64_t> FindLibtpuProcess() {
   return absl::NotFoundError("did not find which pid uses the libtpu.so");
 }
 
+// Attempts to open a lock file at the given path.
+// We use O_EXCL to securely create the file if it doesn't exist,
+// preventing symlink races, and O_CLOEXEC to prevent
+// descriptor leaks to child processes. If the file already exists (EEXIST),
+// we fall back to opening it with O_RDWR | O_NOFOLLOW | O_CLOEXEC.
+int OpenLockFile(const char* path) {
+  int fd = open(path, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
+  if (fd == -1 && errno == EEXIST) {
+    fd = open(path, O_RDWR | O_NOFOLLOW | O_CLOEXEC);
+  }
+  return fd;
+}
+
+// Returns a secure file descriptor for the multi-process TPU lockfile,
+// or -1 if it was unable to open a lockfile in any safe location.
+int OpenTpuLockFile() {
+  static constexpr char libtpu_lockfn[] = "/tmp/libtpu_lockfile";
+  // 1. Attempt to open the standard lock file.
+  int fd = OpenLockFile(libtpu_lockfn);
+  if (fd != -1) {
+    return fd;
+  }
+
+  // 2. Fallback to a user-specific directory under /tmp with 0700 permissions
+  // to prevent local DoS attacks from other users.
+  uid_t uid = getuid();
+  std::string user_lockdir = absl::StrCat("/tmp/libtpu_lock_", uid);
+  bool dir_ok = false;
+  if (mkdir(user_lockdir.c_str(), 0700) == 0 || errno == EEXIST) {
+    // Validate directory ownership to prevent preemptive directory hijacking.
+    struct stat st;
+    if (lstat(user_lockdir.c_str(), &st) == 0) {
+      if (S_ISDIR(st.st_mode) && st.st_uid == uid) {
+        dir_ok = true;
+      }
+    }
+  }
+
+  if (dir_ok) {
+    std::string user_lockfn = absl::StrCat(user_lockdir, "/libtpu_lockfile");
+    fd = OpenLockFile(user_lockfn.c_str());
+    if (fd != -1) {
+      return fd;
+    }
+  }
+
+  // 3. Fallback to the user's home directory as a last resort.
+  const char* home_env = getenv("HOME");
+  if (home_env != nullptr && home_env[0] != '\0') {
+    std::string home_lockfn = absl::StrCat(home_env, "/.libtpu_lockfile");
+    fd = OpenLockFile(home_lockfn.c_str());
+    if (fd != -1) {
+      return fd;
+    }
+  }
+
+  return -1;
+}
+
 }  // namespace
 
 absl::Status TryAcquireTpuLock() {
-  static absl::Mutex* const mu = new absl::Mutex();
-  absl::MutexLock l(*mu);
+  absl::MutexLock l(GetTpuLockMutex());
 
-  std::string load_library_override = absl::StrCat(getenv("TPU_LOAD_LIBRARY"));
+  if (libtpu_acquired) {
+    return absl::OkStatus();
+  }
+
+  std::string load_library_override = GetEnvVar("TPU_LOAD_LIBRARY");
 
   if (load_library_override == "1") {
     VLOG(1) << "TPU_LOAD_LIBRARY=1, force loading libtpu";
+    libtpu_acquired = true;
     return absl::OkStatus();
   } else if (load_library_override == "0") {
     return absl::FailedPreconditionError(
@@ -171,6 +243,7 @@ absl::Status TryAcquireTpuLock() {
   if (allow_multiple_libtpu_load) {
     VLOG(1) << "ALLOW_MULTIPLE_LIBTPU_LOAD is set to True, "
                "allowing multiple concurrent libtpu.so loads.";
+    libtpu_acquired = true;
     return absl::OkStatus();
   }
 
@@ -189,69 +262,90 @@ absl::Status TryAcquireTpuLock() {
   if (!use_all_tpus) {
     VLOG(1) << "TPU_CHIPS_PER_PROCESS_BOUNDS is a subset of host's TPU "
                "devices, allowing multiple libtpu.so loads.";
+    libtpu_acquired = true;
     return absl::OkStatus();
   }
 
-  static constexpr char libtpu_lockfn[] = "/tmp/libtpu_lockfile";
-  static bool libtpu_acquired = false;
-
-  // Clean-up call to remove user owned libtpu lockfile on proc exit.
-  atexit([]() {
-    if (libtpu_acquired) {
-      // Ignores any lockfile removal error at proc exit.
-      unlink(libtpu_lockfn);
-    }
-  });
-
-  int fd = open(libtpu_lockfn, O_CREAT | O_RDWR, 0600);
+  int fd = OpenTpuLockFile();
   if (fd == -1) {
     // File open permission locks multi-user access by default.
+    uid_t uid = getuid();
+    std::string user_lockdir = absl::StrCat("/tmp/libtpu_lock_", uid);
     return absl::AbortedError(absl::StrCat(
-        "The TPU is already in use by another process probably owned by "
-        "another user. Run \"$ sudo lsof -w ",
-        GetTpuDriverFile(),
-        "\" to figure out which process is using the TPU. If you still get "
-        "this message, run \"$ sudo rm /tmp/libtpu_lockfile\"."));
+        "The TPU is already in use or the lock file is stale. Run \"$ sudo ",
+        "lsof -w ", GetTpuDriverFile(),
+        "\" to figure out which process is using the TPU. If no process is "
+        "listed, a stale lock file might exist. The potential lock file "
+        "locations are '/tmp/libtpu_lockfile' and '",
+        user_lockdir,
+        "'. You can attempt to remove them with: \"$ rm /tmp/libtpu_lockfile\" "
+        "and \"$ rm -rf ",
+        user_lockdir,
+        "\". Note: Only remove these files if you are certain no other "
+        "legitimate process is using the TPU."));
   }
 
-  // lockf() holds the lock until the process exits to guard the underlying
-  // TPU devices throughout process lifetime.
+  // lockf()/fcntl() record locks are associated with [Process, Inode].
+  // WARNING: POSIX locks established using lockf can be silently dropped
+  // process-wide if secondary modules open and subsequently close a separate
+  // fd referencing the identical path. Ensure strict lockfile name
+  // exclusivity!
   if (lockf(fd, F_TLOCK, 0) != 0) {
+    // Explicitly closing the FD on lock failure prevents descriptor leaks
+    // if the caller retries or continues.
+    close(fd);
     auto pid = FindLibtpuProcess();
     if (pid.ok()) {
       return absl::AbortedError(absl::StrCat(
           "The TPU is already in use by process with pid ", pid.value(),
           ". Not attempting to load libtpu.so in this process."));
     } else {
-      return absl::AbortedError(
+      uid_t uid = getuid();
+      std::string user_lockdir = absl::StrCat("/tmp/libtpu_lock_", uid);
+      return absl::AbortedError(absl::StrCat(
           "Internal error when accessing libtpu multi-process lockfile. "
-          "Run \"$ sudo rm /tmp/libtpu_lockfile\".");
+          "The potential lock file locations are '/tmp/libtpu_lockfile' and '",
+          user_lockdir,
+          "'. You can attempt to remove them with: \"$ rm "
+          "/tmp/libtpu_lockfile\" and \"$ rm -rf ",
+          user_lockdir,
+          "\". Note: Only remove these files if you are certain no other "
+          "legitimate process is using the TPU."));
     }
   }
+  lock_fd = fd;  // Explicitly persist lock descriptor for process lifetime.
   libtpu_acquired = true;
   return absl::OkStatus();
+}
+
+void ResetTpuLockStateForTesting() {
+  absl::MutexLock l(GetTpuLockMutex());
+  if (lock_fd != -1) {
+    close(lock_fd);
+    lock_fd = -1;
+  }
+  libtpu_acquired = false;
 }
 
 std::pair<std::vector<std::string>, std::vector<const char*>>
 GetLibTpuInitArguments() {
   // We make copies of the arguments returned by getenv because the memory
   // returned may be altered or invalidated by further calls to getenv.
-  std::vector<std::string> args;
-  std::vector<const char*> arg_ptrs;
+  std::pair<std::vector<std::string>, std::vector<const char*>> result;
 
   // Retrieve arguments from environment if applicable.
   char* env = getenv("LIBTPU_INIT_ARGS");
   if (env != nullptr) {
     // TODO(frankchn): Handles quotes properly if necessary.
-    args = absl::StrSplit(env, ' ');
+    result.first = absl::StrSplit(env, ' ');
   }
 
-  arg_ptrs.reserve(args.size());
-  for (int i = 0; i < args.size(); ++i) {
-    arg_ptrs.push_back(args[i].data());
+  result.second.reserve(result.first.size());
+  for (const auto& arg : result.first) {
+    result.second.push_back(arg.data());
   }
 
-  return {std::move(args), std::move(arg_ptrs)};
+  return result;
 }
 
 }  // namespace tpu
