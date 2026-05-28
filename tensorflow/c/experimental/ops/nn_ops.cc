@@ -56,10 +56,14 @@ absl::Status SparseSoftmaxCrossEntropyWithLogits(
   TF_RETURN_IF_ERROR(op_ptr->AddInput(labels));
   int num_retvals = 2;
   AbstractTensorHandle* temp_outputs[2];
-  absl::Status status = op_ptr->Execute(temp_outputs, &num_retvals);
+  TF_RETURN_IF_ERROR(op_ptr->Execute(temp_outputs, &num_retvals));
+  if (num_retvals != 2) {
+    return absl::InternalError(
+        "SparseSoftmaxCrossEntropyWithLogits: unexpected number of outputs");
+  }
   *loss = temp_outputs[0];
   *backprop = temp_outputs[1];
-  return status;
+  return absl::OkStatus();
 }
 
 // Op: ReluGrad()
@@ -77,7 +81,12 @@ absl::Status ReluGrad(AbstractContext* ctx,
   TF_RETURN_IF_ERROR(op_ptr->AddInput(gradients));
   TF_RETURN_IF_ERROR(op_ptr->AddInput(features));
   int num_retvals = 1;
-  return op_ptr->Execute(absl::MakeSpan(backprops, 1), &num_retvals);
+  TF_RETURN_IF_ERROR(
+      op_ptr->Execute(absl::MakeSpan(backprops, 1), &num_retvals));
+  if (num_retvals != 1) {
+    return absl::InternalError("ReluGrad: unexpected number of outputs");
+  }
+  return absl::OkStatus();
 }
 
 // Op: Relu()
@@ -96,7 +105,12 @@ absl::Status Relu(AbstractContext* ctx, AbstractTensorHandle* const features,
   TF_RETURN_IF_ERROR(MaybeSetOpName(op_ptr.get(), name));
   TF_RETURN_IF_ERROR(op_ptr->AddInput(features));
   int num_retvals = 1;
-  return op_ptr->Execute(absl::MakeSpan(activations, 1), &num_retvals);
+  TF_RETURN_IF_ERROR(
+      op_ptr->Execute(absl::MakeSpan(activations, 1), &num_retvals));
+  if (num_retvals != 1) {
+    return absl::InternalError("Relu: unexpected number of outputs");
+  }
+  return absl::OkStatus();
 }
 
 // Op: BiasAdd()
@@ -117,7 +131,11 @@ absl::Status BiasAdd(AbstractContext* ctx, AbstractTensorHandle* const value,
   TF_RETURN_IF_ERROR(
       op_ptr->SetAttrString("data_format", data_format, strlen(data_format)));
   int num_retvals = 1;
-  return op_ptr->Execute(absl::MakeSpan(output, 1), &num_retvals);
+  TF_RETURN_IF_ERROR(op_ptr->Execute(absl::MakeSpan(output, 1), &num_retvals));
+  if (num_retvals != 1) {
+    return absl::InternalError("BiasAdd: unexpected number of outputs");
+  }
+  return absl::OkStatus();
 }
 
 // Op: BiasAddGrad()
@@ -138,7 +156,11 @@ absl::Status BiasAddGrad(AbstractContext* ctx,
   TF_RETURN_IF_ERROR(
       op_ptr->SetAttrString("data_format", data_format, strlen(data_format)));
   int num_retvals = 1;
-  return op_ptr->Execute(absl::MakeSpan(output, 1), &num_retvals);
+  TF_RETURN_IF_ERROR(op_ptr->Execute(absl::MakeSpan(output, 1), &num_retvals));
+  if (num_retvals != 1) {
+    return absl::InternalError("BiasAddGrad: unexpected number of outputs");
+  }
+  return absl::OkStatus();
 }
 
 }  // namespace ops
