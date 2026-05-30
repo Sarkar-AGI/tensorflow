@@ -245,16 +245,15 @@ cc_library(
     ]),
     deps = [
         ":ifrt",
-        ":user_context",
+        ":value_util",
         "//xla/python/pjrt_ifrt:pjrt_layout",
         "//xla/tsl/concurrency:ref_count",
-        "//xla/tsl/platform:errors",
         "//xla/tsl/platform:status_macros",
-        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
+        "@llvm-project//llvm:Support",
     ],
 )
 
@@ -648,6 +647,26 @@ cc_library(
 build_test(
     name = "client_test_no_impl",
     targets = [":client_impl_test_lib"],
+)
+
+cc_library(
+    name = "bundle_impl_test_lib",
+    testonly = True,
+    srcs = ["bundle_impl_test_lib.cc"],
+    visibility = internal_visibility([
+        ":friends",
+        ":internal",
+    ]),
+    deps = [
+        ":ifrt",
+        ":test_util",
+        "//xla/tsl/concurrency:ref_count",
+        "//xla/tsl/platform:test",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/types:span",
+        "@llvm-project//llvm:Support",
+    ],
+    alwayslink = True,
 )
 
 cc_library(
@@ -1450,13 +1469,28 @@ cc_library(
 )
 
 cc_library(
-    name = "value_util_cc",
-    srcs = ["value_util.cc"],
-    hdrs = ["value_util.h"],
+    name = "basic_bundle",
+    srcs = ["basic_bundle.cc"],
+    hdrs = ["basic_bundle.h"],
+    visibility = internal_visibility([
+        ":friends",
+        ":internal",
+    ]),
     deps = [
         ":ifrt",
+        ":user_context",
+        ":value_util",
+        "//xla/pjrt:pjrt_layout",
+        "//xla/tsl/concurrency:future",
         "//xla/tsl/concurrency:ref_count",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_macros",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:Support",
     ],

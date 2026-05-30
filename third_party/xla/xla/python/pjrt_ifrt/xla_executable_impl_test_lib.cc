@@ -29,6 +29,7 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "xla/tsl/platform/status_macros.h"
+#include "llvm/Support/Casting.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OwningOpRef.h"
@@ -37,6 +38,7 @@ limitations under the License.
 #include "xla/pjrt/mlir_to_hlo.h"
 #include "xla/pjrt/pjrt_executable.h"
 #include "xla/python/ifrt/array.h"
+#include "xla/python/ifrt/bundle.h"
 #include "xla/python/ifrt/client.h"
 #include "xla/python/ifrt/compiler.h"
 #include "xla/python/ifrt/device.h"
@@ -50,6 +52,7 @@ limitations under the License.
 #include "xla/python/ifrt/sharding.h"
 #include "xla/python/ifrt/test_util.h"
 #include "xla/python/ifrt/user_context.h"
+#include "xla/python/ifrt/value.h"
 #include "xla/python/pjrt_ifrt/basic_string_array.h"
 #include "xla/python/pjrt_ifrt/executable_metadata.pb.h"
 #include "xla/python/pjrt_ifrt/pjrt_layout.h"
@@ -91,6 +94,27 @@ static const char* const module_add_one =
   }
 })";
 
+// Serialized `ModuleOp` that has 3 inputs and 3 outputs, adding a constant 100,
+// 200, 300 to each input to produce an output, respectively.
+static const char* const module_three_inputs_outputs =
+    R"(module {
+  func.func @main(%arg0: tensor<2x3xf32>, %arg1: tensor<2x3xf32>, %arg2: tensor<2x3xf32>) -> (tensor<2x3xf32>, tensor<2x3xf32>, tensor<2x3xf32>) {
+    %0 = stablehlo.constant dense<1.000000e+02> : tensor<f32>
+    %1 = "stablehlo.broadcast_in_dim"(%0) {broadcast_dimensions = array<i64>} : (tensor<f32>) -> tensor<2x3xf32>
+    %out0 = stablehlo.add %arg0, %1 : tensor<2x3xf32>
+
+    %2 = stablehlo.constant dense<2.000000e+02> : tensor<f32>
+    %3 = "stablehlo.broadcast_in_dim"(%2) {broadcast_dimensions = array<i64>} : (tensor<f32>) -> tensor<2x3xf32>
+    %out1 = stablehlo.add %arg1, %3 : tensor<2x3xf32>
+
+    %4 = stablehlo.constant dense<3.000000e+02> : tensor<f32>
+    %5 = "stablehlo.broadcast_in_dim"(%4) {broadcast_dimensions = array<i64>} : (tensor<f32>) -> tensor<2x3xf32>
+    %out2 = stablehlo.add %arg2, %5 : tensor<2x3xf32>
+
+    return %out0, %out1, %out2 : tensor<2x3xf32>, tensor<2x3xf32>, tensor<2x3xf32>
+  }
+})";
+
 static const char* const module_add_sub = R"(
 module @add_sub attributes {
   mhlo.num_replicas = 1 : i32,
@@ -116,7 +140,8 @@ module @add_sub attributes {
 // serialization round-trip of the executable.
 absl::StatusOr<LoadedExecutableRef> CompileOnDevices(
     Client* client, Compiler* compiler, absl::string_view mlir_module_str,
-    absl::Span<Device* const> devices, bool replicated, bool serialize) {
+    absl::Span<Device* const> devices, bool replicated, bool serialize,
+    std::optional<std::vector<int>> outputs_bundle_slice_sizes = std::nullopt) {
   mlir::MLIRContext context;
   ASSIGN_OR_RETURN(mlir::OwningOpRef<mlir::ModuleOp> module,
                    xla::ParseMlirModuleString(mlir_module_str, context));
@@ -159,6 +184,8 @@ absl::StatusOr<LoadedExecutableRef> CompileOnDevices(
   }
   auto xla_compile_options =
       std::make_unique<XlaCompileOptions>(compile_options, device_list);
+  xla_compile_options->outputs_bundle_slice_sizes =
+      std::move(outputs_bundle_slice_sizes);
   ASSIGN_OR_RETURN(auto loaded_executable,
                    compiler
                        ->CompileAndLoad(std::make_unique<HloProgram>(*module),
@@ -385,6 +412,180 @@ TEST_P(LoadedExecutableImplTest, CompileAndExecute) {
   std::vector<float> expected_out_data(6);
   absl::c_iota(expected_out_data, 1);
   EXPECT_THAT(out_data, ElementsAreArray(expected_out_data));
+}
+
+TEST_P(LoadedExecutableImplTest,
+       CompileAndExecuteBundleThreeInputsOutputsSingleBundle) {
+  bool serialize = GetParam();
+
+  ASSERT_OK_AND_ASSIGN(auto client, test_util::GetClient());
+  Compiler* compiler = client->GetDefaultCompiler();
+
+  std::vector<Device*> devices = {client->addressable_devices().at(0)};
+  LoadedExecutableRef loaded_executable;
+  {
+    UserContextScope user_context_scope(test_util::MakeUserContext(20));
+    ASSERT_OK_AND_ASSIGN(
+        loaded_executable,
+        CompileOnDevices(client.get(), compiler, module_three_inputs_outputs,
+                         devices, /*replicated=*/false, serialize));
+  }
+
+  DType dtype(DType::kF32);
+  Shape shape({2, 3});
+  Device* device = client->addressable_devices().at(0);
+  ShardingRef sharding = SingleDeviceSharding::Create(device, MemoryKind());
+
+  std::vector<ValueRef> input_values;
+  const float kPerArrayIncrement = 10.0f;
+  for (int i = 0; i < 3; ++i) {
+    std::vector<float> data(6);
+    absl::c_iota(data, i * kPerArrayIncrement);
+    ASSERT_OK_AND_ASSIGN(
+        ArrayRef array,
+        client->MakeArrayFromHostBuffer(
+            data.data(), dtype, shape,
+            /*byte_strides=*/std::nullopt, sharding, /*layout=*/nullptr,
+            Client::HostBufferSemantics::kImmutableOnlyDuringCall,
+            /*on_done_with_host_buffer=*/{}));
+    input_values.push_back(array);
+  }
+
+  ASSERT_OK_AND_ASSIGN(BundleRef input_bundle,
+                       client->Bundle(absl::MakeSpan(input_values),
+                                      ArrayCopySemantics::kReuseInput));
+
+  ExecuteOptions execute_options;
+  execute_options.fill_status = true;
+  LoadedExecutable::ExecuteBundleResult result;
+  {
+    UserContextScope user_context_scope(test_util::MakeUserContext(100));
+    ASSERT_OK_AND_ASSIGN(
+        result, loaded_executable->ExecuteBundle(
+                    absl::MakeSpan(&input_bundle, 1), execute_options));
+  }
+  ASSERT_OK(result.status.Await());
+  EXPECT_THAT(result.outputs, SizeIs(1));  // 1 output bundle
+
+  ASSERT_OK_AND_ASSIGN(
+      std::vector<ValueRef> retrieved_outputs,
+      result.outputs[0]->GetValues(ArrayCopySemantics::kReuseInput));
+  ASSERT_EQ(retrieved_outputs.size(), 3);
+
+  for (int i = 0; i < 3; ++i) {
+    auto* out_array = llvm::dyn_cast<Array>(retrieved_outputs[i].get());
+    ASSERT_NE(out_array, nullptr);
+
+    std::vector<float> out_data(6);
+    auto future = out_array->CopyToHostBuffer(out_data.data(),
+                                              /*byte_strides=*/std::nullopt,
+                                              ArrayCopySemantics::kAlwaysCopy);
+    ASSERT_OK(future.Await());
+
+    std::vector<float> expected_out_data(6);
+    absl::c_iota(expected_out_data,
+                 i * kPerArrayIncrement + (i + 1) * 100);  // +100, +200, +300
+    EXPECT_THAT(out_data, ElementsAreArray(expected_out_data));
+  }
+}
+
+TEST_P(LoadedExecutableImplTest,
+       CompileAndExecuteBundleThreeInputsOutputsSplitBundle) {
+  bool serialize = GetParam();
+
+  ASSERT_OK_AND_ASSIGN(auto client, test_util::GetClient());
+  Compiler* compiler = client->GetDefaultCompiler();
+
+  std::vector<Device*> devices = {client->addressable_devices().at(0)};
+  LoadedExecutableRef loaded_executable;
+  {
+    UserContextScope user_context_scope(test_util::MakeUserContext(20));
+    // Output bundle split: 2 bundles of sizes 2 and 1.
+    ASSERT_OK_AND_ASSIGN(
+        loaded_executable,
+        CompileOnDevices(
+            client.get(), compiler, module_three_inputs_outputs, devices,
+            /*replicated=*/false, serialize,
+            /*outputs_bundle_slice_sizes=*/std::vector<int>{2, 1}));
+  }
+
+  DType dtype(DType::kF32);
+  Shape shape({2, 3});
+  Device* device = client->addressable_devices().at(0);
+  ShardingRef sharding = SingleDeviceSharding::Create(device, MemoryKind());
+
+  std::vector<ArrayRef> input_arrays;
+  const float kPerArrayIncrement = 10.0f;
+  for (int i = 0; i < 3; ++i) {
+    std::vector<float> data(6);
+    absl::c_iota(data, i * kPerArrayIncrement);
+    ASSERT_OK_AND_ASSIGN(
+        ArrayRef array,
+        client->MakeArrayFromHostBuffer(
+            data.data(), dtype, shape,
+            /*byte_strides=*/std::nullopt, sharding, /*layout=*/nullptr,
+            Client::HostBufferSemantics::kImmutableOnlyDuringCall,
+            /*on_done_with_host_buffer=*/{}));
+    input_arrays.push_back(array);
+  }
+
+  // 2 input bundles: sizes 1 and 2.
+  std::vector<ValueRef> values1 = {input_arrays[0]};
+  TF_ASSERT_OK_AND_ASSIGN(
+      BundleRef input_bundle1,
+      client->Bundle(absl::MakeSpan(values1), ArrayCopySemantics::kReuseInput));
+
+  std::vector<ValueRef> values2 = {input_arrays[1], input_arrays[2]};
+  TF_ASSERT_OK_AND_ASSIGN(
+      BundleRef input_bundle2,
+      client->Bundle(absl::MakeSpan(values2), ArrayCopySemantics::kReuseInput));
+
+  std::vector<BundleRef> input_bundles = {input_bundle1, input_bundle2};
+
+  ExecuteOptions execute_options;
+  execute_options.fill_status = true;
+  LoadedExecutable::ExecuteBundleResult result;
+  {
+    UserContextScope user_context_scope(test_util::MakeUserContext(100));
+    TF_ASSERT_OK_AND_ASSIGN(
+        result, loaded_executable->ExecuteBundle(absl::MakeSpan(input_bundles),
+                                                 execute_options));
+  }
+  ASSERT_OK(result.status.Await());
+  EXPECT_THAT(result.outputs,
+              SizeIs(2));  // 2 output bundles expected: sizes 2 and 1.
+
+  EXPECT_EQ(result.outputs[0]->num_values(), 2);
+  EXPECT_EQ(result.outputs[1]->num_values(), 1);
+
+  ASSERT_OK_AND_ASSIGN(
+      std::vector<ValueRef> retrieved_outputs0,
+      result.outputs[0]->GetValues(ArrayCopySemantics::kReuseInput));
+  ASSERT_EQ(retrieved_outputs0.size(), 2);
+
+  ASSERT_OK_AND_ASSIGN(
+      std::vector<ValueRef> retrieved_outputs1,
+      result.outputs[1]->GetValues(ArrayCopySemantics::kReuseInput));
+  ASSERT_EQ(retrieved_outputs1.size(), 1);
+
+  std::vector<ValueRef> all_outputs = retrieved_outputs0;
+  all_outputs.push_back(retrieved_outputs1[0]);
+
+  for (int i = 0; i < 3; ++i) {
+    auto* out_array = llvm::dyn_cast<Array>(all_outputs[i].get());
+    ASSERT_NE(out_array, nullptr);
+
+    std::vector<float> out_data(6);
+    auto future = out_array->CopyToHostBuffer(out_data.data(),
+                                              /*byte_strides=*/std::nullopt,
+                                              ArrayCopySemantics::kAlwaysCopy);
+    ASSERT_OK(future.Await());
+
+    std::vector<float> expected_out_data(6);
+    absl::c_iota(expected_out_data,
+                 i * kPerArrayIncrement + (i + 1) * 100);  // +100, +200, +300
+    EXPECT_THAT(out_data, ElementsAreArray(expected_out_data));
+  }
 }
 
 TEST_P(LoadedExecutableImplTest, CompileAndExecutePortable) {
