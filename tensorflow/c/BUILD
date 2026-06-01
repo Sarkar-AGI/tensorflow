@@ -536,6 +536,7 @@ cc_library(
         ":tf_status_helper",
         ":tf_tensor_internal",
         "//tensorflow/core/platform:status",
+        "@com_google_absl//absl/status",
     ] + select({
         "//tensorflow:android": [
             "//tensorflow/core:portable_tensorflow_lib_lite",  # TODO(annarev): exclude runtime srcs

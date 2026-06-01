@@ -269,6 +269,16 @@ def _ragged_segment_aggregate(
     data_val_to_out_val_index = range(data_row_to_out_row_start,
                                       data_row_to_out_row_limit).values
 
+    segment_ids_per_val = array_ops.repeat(segment_ids, data_row_lengths)
+    data_val_to_out_val_index = array_ops.where(
+        segment_ids_per_val < 0,
+        array_ops.fill(
+            array_ops.shape(data_val_to_out_val_index),
+            math_ops.cast(-1, data_val_to_out_val_index.dtype),
+        ),
+        data_val_to_out_val_index,
+    )
+
     # Recursively aggregate the values.
     output_values = _ragged_segment_aggregate(
         unsorted_segment_op,
