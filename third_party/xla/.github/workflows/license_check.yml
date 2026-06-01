@@ -1,0 +1,99 @@
+# Copyright 2026 The OpenXLA Authors. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ============================================================================
+name: License Check
+
+permissions: {}
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  license-check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 6
+    steps:
+      - name: "Checking out repository"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: "Set up Go"
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: 'stable'
+
+      - name: "Install addlicense"
+        run: go install github.com/google/addlicense@b289835c0741ba2fb92dd5f61af070e79c69a55e # v1.2.0
+
+      - name: "Run license check"
+        run: |
+          find . -path "./third_party" -prune -o -type f -name "*.*" \
+            ! -name "*.bazel.lock" \
+            ! -name "_toc.yaml" \
+            ! -name "*.bin" \
+            ! -name "*.bmp" \
+            ! -name "*.bytes" \
+            ! -name "*.cff" \
+            ! -name "*.clang-format" \
+            ! -name "*.clang-tidy" \
+            ! -name "*.csv" \
+            ! -name "*.dat" \
+            ! -name "*.data-*" \
+            ! -name "*.dict" \
+            ! -name "*.diff" \
+            ! -name "*.flac" \
+            ! -name "*.gif" \
+            ! -name "*.golden" \
+            ! -name "*.golden_summary" \
+            ! -name "*.gz" \
+            ! -name "*.ico" \
+            ! -name "*.index" \
+            ! -name "*.ipynb" \
+            ! -name "*.jar" \
+            ! -name "*.jpg" \
+            ! -name "*.json" \
+            ! -name "*.lite" \
+            ! -name "*.mdb" \
+            ! -name "*.meta" \
+            ! -name "*.parquet" \
+            ! -name "*.patch" \
+            ! -name "*.pb" \
+            ! -name "*.pdf" \
+            ! -name "*.png" \
+            ! -name "*.pyc" \
+            ! -name "*.svg" \
+            ! -name "*.symbols" \
+            ! -name "*.text" \
+            ! -name "*.textproto" \
+            ! -name "*.tflite" \
+            ! -name "*.tfrecord" \
+            ! -name "*.tsv" \
+            ! -name "*.txt" \
+            ! -name "*.voc" \
+            ! -name "*.vocab" \
+            ! -name "*.wav" \
+            ! -name "*.webp" \
+            ! -name "__init__.py" \
+            ! -name "*.bazel" \
+            ! -name "*.bzl" \
+            ! -name "*.BUILD" \
+            ! -name "*.proto" \
+            -print0 | xargs -0 addlicense -c "The OpenXLA Authors" -l apache -check
