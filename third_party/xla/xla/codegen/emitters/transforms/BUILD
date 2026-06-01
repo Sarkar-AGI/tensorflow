@@ -205,6 +205,7 @@ cc_library(
         "//xla/codegen/intrinsic:rsqrt",
         "//xla/codegen/intrinsic:tanh",
         "//xla/codegen/intrinsic:type",
+        "//xla/codegen/intrinsic/cpp:_intrinsic_declarations",
         "//xla/hlo/analysis:indexing_analysis",
         "//xla/hlo/analysis:symbolic_map",
         "//xla/mlir_hlo",

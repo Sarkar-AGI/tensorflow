@@ -193,6 +193,7 @@ cc_library(
         "//xla/codegen/intrinsic",
         "//xla/codegen/intrinsic:type",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
         "@llvm-project//llvm:ir_headers",
     ],

@@ -19,6 +19,7 @@ limitations under the License.
 #include <vector>
 
 #include "absl/log/check.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
@@ -33,6 +34,25 @@ namespace xla::codegen::intrinsics {
 class EigenTanh : public Intrinsic<EigenTanh> {
  public:
   static constexpr absl::string_view kName = "tanh";
+
+  static std::vector<std::vector<Type>> SupportedVectorTypes(
+      absl::string_view features) {
+    return {
+        {Type::S(xla::F32)},     {Type::V(xla::F32, 4)}, {Type::V(xla::F32, 8)},
+        {Type::V(xla::F32, 16)}, {Type::S(xla::F64)},    {Type::V(xla::F64, 4)},
+        {Type::V(xla::F64, 8)},
+    };
+  }
+
+  static absl::StatusOr<llvm::Function*> CreateDefinition(
+      llvm::Module* module, const IntrinsicOptions& options, Type type) {
+    return GetCppGenFunction(module, Name(type));
+  }
+};
+
+class EigenAtan : public Intrinsic<EigenAtan> {
+ public:
+  static constexpr absl::string_view kName = "atan";
 
   static std::vector<std::vector<Type>> SupportedVectorTypes(
       absl::string_view features) {

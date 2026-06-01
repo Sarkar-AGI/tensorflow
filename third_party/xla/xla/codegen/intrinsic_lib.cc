@@ -23,47 +23,23 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "absl/container/btree_map.h"
+#include "absl/container/btree_set.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "llvm/Analysis/CGSCCPassManager.h"
-#include "llvm/Analysis/LoopAnalysisManager.h"
-#include "llvm/Analysis/TargetLibraryInfo.h"
-#include "llvm/ExecutionEngine/ExecutionEngine.h"
-#include "llvm/ExecutionEngine/Orc/IRCompileLayer.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
-#include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/Intrinsics.h"
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
-#include "llvm/IR/PassManager.h"
-#include "llvm/IR/Type.h"
-#include "llvm/IR/Value.h"
 #include "llvm/IR/Verifier.h"
-#include "llvm/Linker/Linker.h"
-#include "llvm/Passes/PassBuilder.h"
-#include "llvm/Passes/StandardInstrumentations.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/Support/TypeSize.h"
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/IPO/AlwaysInliner.h"
-#include "llvm/Transforms/IPO/GlobalDCE.h"
-#include "llvm/Transforms/IPO/SCCP.h"
-#include "llvm/Transforms/IPO/StripDeadPrototypes.h"
-#include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Scalar/DCE.h"
-#include "llvm/Transforms/Scalar/EarlyCSE.h"
-#include "llvm/Transforms/Scalar/SCCP.h"
-#include "llvm/Transforms/Utils/Cloning.h"
-#include "llvm/Transforms/Utils/ModuleUtils.h"
 #include "xla/codegen/intrinsic/cpp/cpp_gen_intrinsics.h"
+#include "xla/codegen/intrinsic/cpp/intrinsic_declarations.h"
 #include "xla/codegen/intrinsic/erf.h"
 #include "xla/codegen/intrinsic/exp.h"
 #include "xla/codegen/intrinsic/fptrunc.h"
@@ -119,20 +95,21 @@ class IntrinsicAdapter : public IntrinsicFunction {
     absl::StatusOr<intrinsic::ParsedFunctionName> parsed =
         intrinsic::ParseFunctionName(name);
     CHECK_OK(parsed);
-    return apply_vector<Intrinsic::kNumArgs>(
-               [&](auto... args) {
-                 if constexpr (std::is_invocable_v<
-                                   decltype(Intrinsic::CreateDefinition),
-                                   llvm::Module*, IntrinsicOptions,
-                                   decltype(args)...>) {
-                   return Intrinsic::CreateDefinition(&module, options,
-                                                      args...);
-                 } else {
-                   return Intrinsic::CreateDefinition(&module, args...);
-                 }
-               },
-               parsed->types)
-        .value();
+    absl::StatusOr<llvm::Function*> definition =
+        apply_vector<Intrinsic::kNumArgs>(
+            [&](auto... args) {
+              if constexpr (std::is_invocable_v<
+                                decltype(Intrinsic::CreateDefinition),
+                                llvm::Module*, IntrinsicOptions,
+                                decltype(args)...>) {
+                return Intrinsic::CreateDefinition(&module, options, args...);
+              } else {
+                return Intrinsic::CreateDefinition(&module, args...);
+              }
+            },
+            parsed.value().types);
+    CHECK_OK(definition);
+    return definition.value();
   }
 
   std::string GenerateVectorizedFunctionName(
@@ -171,6 +148,8 @@ IntrinsicFunctionLib::IntrinsicFunctionLib(const IntrinsicOptions& options)
       std::make_unique<IntrinsicAdapter<intrinsics::Rsqrt>>());
   intrinsic_functions_.push_back(
       std::make_unique<IntrinsicAdapter<intrinsics::Tanh>>());
+  intrinsic_functions_.push_back(
+      std::make_unique<IntrinsicAdapter<intrinsics::EigenAtan>>());
 }
 
 namespace {
@@ -192,11 +171,11 @@ void VisitFunctionCalls(llvm::Module& module,
 // Returns the VecCallInfo that we need to generate definitions for all calls
 // to math approximations in the module. Assumes that the module has already
 // been optimized and that all calls to math approximations are unary.
-absl::flat_hash_map<absl::string_view, absl::flat_hash_set<absl::string_view>>
+absl::btree_map<absl::string_view, absl::btree_set<absl::string_view>>
 GetCalledApproximatableFunctions(
     llvm::Module& module,
     absl::flat_hash_map<absl::string_view, absl::string_view> targets) {
-  absl::flat_hash_map<absl::string_view, absl::flat_hash_set<absl::string_view>>
+  absl::btree_map<absl::string_view, absl::btree_set<absl::string_view>>
       called_targets;
   VisitFunctionCalls(module, [&](const llvm::CallInst& call) {
     if (call.getCalledFunction() != nullptr) {
@@ -295,8 +274,9 @@ IntrinsicFunctionLib::DefineIntrinsicFunctions(llvm::Module& module) {
   // Find each called target function, generate the definition and insert it
   // into the module.
   absl::flat_hash_set<absl::string_view> replaced_functions;
-  for (const auto& [function_name, signatures] :
-       GetCalledApproximatableFunctions(module, targets_)) {
+  auto called_functions = GetCalledApproximatableFunctions(module, targets_);
+
+  for (const auto& [function_name, signatures] : called_functions) {
     for (const auto& math_func : intrinsic_functions_) {
       if (math_func->FunctionName() == function_name) {
         for (const auto& signature : signatures) {

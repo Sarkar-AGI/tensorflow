@@ -16,6 +16,7 @@ limitations under the License.
 #include "xla/codegen/intrinsic/cpp/eigen_unary.h"
 
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -23,7 +24,6 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
-#include "llvm/IRReader/IRReader.h"
 #include "llvm/Support/raw_ostream.h"
 #include "xla/codegen/intrinsic/cpp/cpp_gen_intrinsics.h"
 #include "xla/codegen/intrinsic/cpp/eigen_unary_ll.h"
@@ -37,6 +37,8 @@ using ::testing::Not;
 using ::xla::codegen::intrinsic::NearUlps;
 
 constexpr int kTanhUlps = 5;
+constexpr int kAtanF32Ulps = 3;
+constexpr int kAtanF64Ulps = 2;
 
 TEST(EigenUnaryTest, FastTanhfIsCorrect) {
   Vec16f x = {1.0f,  2.0f,  -1.0f, 4.0f,   8.0f,   16.0f,  32.0f, 200.0f,
@@ -114,6 +116,110 @@ TEST(EigenUnaryTest, FastTanhfIsVectorized) {
   EXPECT_THAT(ir, Not(ContainsRegex("llvm.aarch64")));
   EXPECT_THAT(ir, ContainsRegex("xla.unused.tanh.v16f32"));
   EXPECT_THAT(ir, ContainsRegex("xla.unused.tanh.v8f64"));
+}
+
+TEST(EigenUnaryTest, FastAtanfIsCorrect) {
+  Vec16f x = {1.0f,  2.0f,  -1.0f, 4.0f,   8.0f,   16.0f,  32.0f, 200.0f,
+              -2.0f, -4.0f, -8.0f, -16.0f, -32.0f, -64.0f, 0.0f,  0.5f};
+  Vec16f y = atan_v16f32(x);
+  for (int i = 0; i < 16; ++i) {
+    EXPECT_THAT(y[i], NearUlps(std::atan(x[i]), kAtanF32Ulps))
+        << x[i] << " " << std::atan(x[i]);
+  }
+}
+
+TEST(EigenUnaryTest, FastAtandIsCorrect) {
+  Vec4d x = {1.0, 2.0, -1.0, 4.0};
+  Vec4d y = atan_v4f64(x);
+  for (int i = 0; i < 4; ++i) {
+    EXPECT_THAT(y[i], NearUlps(std::atan(x[i]), kAtanF64Ulps));
+  }
+}
+
+TEST(EigenUnaryTest, LinspaceInputsAtanfCorrectness) {
+  constexpr float start = -100.0f;
+  constexpr float end = 100.0f;
+  constexpr int steps = 1000 * 16;
+  constexpr float step = (end - start) / steps;
+
+  for (int i = 0; i < steps; i += 16) {
+    Vec16f x;
+    for (int j = 0; j < 16; ++j) {
+      x[j] = start + (i + j) * step;
+    }
+    Vec16f y = atan_v16f32(x);
+    for (int j = 0; j < 16; ++j) {
+      EXPECT_THAT(y[j], NearUlps(std::atan(x[j]), kAtanF32Ulps));
+    }
+  }
+}
+
+TEST(EigenUnaryTest, v4f32AtanIsCorrect) {
+  Vec4f x = {1.0f, 2.0f, -1.0f, 4.0f};
+  Vec4f y = atan_v4f32(x);
+  for (int i = 0; i < 4; ++i) {
+    EXPECT_THAT(y[i], NearUlps(std::atan(x[i]), kAtanF32Ulps));
+  }
+}
+
+TEST(EigenUnaryTest, v8f32AtanIsCorrect) {
+  Vec8f x = {1.0f, 2.0f, -1.0f, 4.0f, 8.0f, 16.0f, 32.0f, 64.0f};
+  Vec8f y = atan_v8f32(x);
+  for (int i = 0; i < 8; ++i) {
+    EXPECT_THAT(y[i], NearUlps(std::atan(x[i]), kAtanF32Ulps));
+  }
+}
+
+TEST(EigenUnaryTest, v8f64AtanIsCorrect) {
+  Vec8d x = {1.0, 2.0, -1.0, 4.0, 8.0, 16.0, 32.0, 64.0};
+  Vec8d y = atan_v8f64(x);
+  for (int i = 0; i < 8; ++i) {
+    EXPECT_THAT(y[i], NearUlps(std::atan(x[i]), kAtanF64Ulps));
+  }
+}
+
+TEST(EigenUnaryTest, AtanIsVectorized) {
+  llvm::LLVMContext context;
+  std::unique_ptr<llvm::Module> module =
+      ParseEmbeddedBitcode(context, llvm_ir::kEigenUnaryLlIr);
+
+  std::string ir;
+  llvm::raw_string_ostream stream(ir);
+  module->print(stream, nullptr);
+
+  EXPECT_THAT(ir, ContainsRegex("fmul <16 x float>"));
+  EXPECT_THAT(ir, ContainsRegex("fmul <8 x double>"));
+  EXPECT_THAT(ir, ContainsRegex("<16 x float>.*f0x3DE56E67"));
+  EXPECT_THAT(ir, ContainsRegex("<8 x double>.*f0x3EFBF668DC1807E8"));
+  EXPECT_THAT(ir, Not(ContainsRegex("llvm.x86")));
+  EXPECT_THAT(ir, Not(ContainsRegex("llvm.aarch64")));
+  EXPECT_THAT(ir, ContainsRegex("xla.atan.v16f32"));
+  EXPECT_THAT(ir, ContainsRegex("xla.atan.v8f64"));
+  EXPECT_THAT(ir, ContainsRegex("xla.atan.f32"));
+  EXPECT_THAT(ir, ContainsRegex("xla.atan.f64"));
+}
+
+TEST(EigenUnaryTest, AtanEdgeCases) {
+  constexpr float kPiOver2f = 1.57079632679489661923f;
+  constexpr double kPiOver2 = 1.57079632679489661923;
+
+  // Float NaN
+  float nan_f = std::numeric_limits<float>::quiet_NaN();
+  EXPECT_TRUE(std::isnan(atan_f32(nan_f)));
+
+  // Float Infinity
+  float inf_f = std::numeric_limits<float>::infinity();
+  EXPECT_NEAR(atan_f32(inf_f), kPiOver2f, 1e-6f);
+  EXPECT_NEAR(atan_f32(-inf_f), -kPiOver2f, 1e-6f);
+
+  // Double NaN
+  double nan_d = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_TRUE(std::isnan(atan_f64(nan_d)));
+
+  // Double Infinity
+  double inf_d = std::numeric_limits<double>::infinity();
+  EXPECT_NEAR(atan_f64(inf_d), kPiOver2, 1e-14);
+  EXPECT_NEAR(atan_f64(-inf_d), -kPiOver2, 1e-14);
 }
 
 }  // namespace
