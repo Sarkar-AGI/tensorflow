@@ -244,6 +244,12 @@ xla::Future<std::unique_ptr<CollectiveKernelThunk>> EmitCollectiveKernelThunk(
       NewModuleWithFusion(instr, HloInstruction::FusionKind::kLoop);
   HloFusionInstruction* fusion_instr = Cast<HloFusionInstruction>(
       fused_module->entry_computation()->root_instruction());
+  const bool has_rank_higher_than_1 =
+      instr->shape().IsArray() && instr->shape().dimensions().size() > 1;
+  if (has_rank_higher_than_1) {
+    RETURN_IF_ERROR(
+        FlattenCollectiveModuleTo1D(fused_module->entry_computation()));
+  }
   const se::DeviceDescription& device_info =
       ir_emitter_context->gpu_device_info();
   bool is_collective_kernel_enabled =

@@ -20,6 +20,7 @@ limitations under the License.
 #include <optional>
 #include <vector>
 
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/IR/Builders.h"
@@ -35,6 +36,11 @@ limitations under the License.
 #include "xla/types.h"  // IWYU pragma: keep
 
 namespace xla::gpu {
+
+// Flattens a > 1D collective computation to a 1D computation inplace.
+// For example, a 2D module with shape [2, 3] will be flattened to a 1D
+// module with shape [6] surrounded by bitcasts.
+absl::Status FlattenCollectiveModuleTo1D(HloComputation* entry_computation);
 
 // Returns a tile such that each dimension is a power of two and that the total
 // number of blocks does not exceed num_blocks. Returns the tile sizes in

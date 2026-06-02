@@ -734,9 +734,7 @@ cc_library(
         "//xla/service/gpu:launch_dimensions",
         "//xla/stream_executor:device_description",
         "//xla/stream_executor/gpu:all_reduce_kernel",
-        "//xla/tsl/platform:errors",
         "//xla/tsl/platform:status_macros",
-        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -787,7 +785,6 @@ xla_cc_test(
     deps = [
         ":collective_emitter",
         ":fusion",
-        ":xtile_compiler",
         "//xla:shape_util",
         "//xla:status_macros",
         "//xla:util",

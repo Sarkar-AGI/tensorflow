@@ -74,8 +74,6 @@ limitations under the License.
 #include "xla/status_macros.h"
 #include "xla/stream_executor/device_description.h"
 #include "xla/stream_executor/gpu/all_reduce_kernel.h"
-#include "xla/tsl/platform/errors.h"
-#include "xla/tsl/platform/statusor.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -916,6 +914,45 @@ class AllReduceEmitter {
 };
 
 }  // namespace
+
+absl::Status FlattenCollectiveModuleTo1D(HloComputation* entry_computation) {
+  HloFusionInstruction* fusion_instr =
+      DynCast<HloFusionInstruction>(entry_computation->root_instruction());
+  if (fusion_instr == nullptr) {
+    return absl::InternalError(
+        absl::StrFormat("Expected the root of the entry computation to be a "
+                        "fusion instruction :%s",
+                        entry_computation->ToString()));
+  }
+  HloComputation* fused_computation =
+      fusion_instr->fused_instructions_computation();
+  Shape original_shape = fusion_instr->shape();
+  const int64_t total_elements = ShapeUtil::ElementsIn(original_shape);
+  Shape flat_shape = ShapeUtil::MakeShapeWithDenseLayout(
+      original_shape.element_type(), {total_elements}, {0});
+  if (fused_computation->parameter_instructions().size() != 1) {
+    return absl::InternalError(
+        "Flattening to 1D is not supported for variadic fused computations "
+        "with more than one parameter instruction");
+  }
+  for (HloInstruction* param : fused_computation->parameter_instructions()) {
+    *param->mutable_shape() = flat_shape;
+  }
+  HloInstruction* collective = fused_computation->root_instruction();
+  *collective->mutable_shape() = flat_shape;
+  *fusion_instr->mutable_shape() = flat_shape;
+  HloInstruction* entry_param = entry_computation->parameter_instruction(0);
+  HloInstruction* bitcast_to_1d = entry_computation->AddInstruction(
+      HloInstruction::CreateBitcast(flat_shape, entry_param));
+  RETURN_IF_ERROR(
+      fusion_instr->ReplaceOperandWithDifferentShape(0, bitcast_to_1d));
+
+  HloInstruction* bitcast_to_original_shape = entry_computation->AddInstruction(
+      HloInstruction::CreateBitcast(original_shape, fusion_instr));
+  entry_computation->set_root_instruction(bitcast_to_original_shape,
+                                          /*accept_different_shape=*/true);
+  return absl::OkStatus();
+}
 
 llvm::SmallVector<int64_t> GreedyPowerOfTwoTiles(const Shape& output_shape,
                                                  int32_t num_blocks) {
