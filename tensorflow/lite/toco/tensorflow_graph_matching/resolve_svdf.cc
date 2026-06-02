@@ -23,6 +23,7 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "absl/log/absl_check.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "tensorflow/core/framework/attr_value.pb.h"
@@ -210,6 +211,8 @@ void SvdfCluster::MaybeMergeConstNodes(
       }
     }
   }
+  ABSL_CHECK_EQ(allocated_content_flat_size,
+                dim0_size * dim1_size * sizeof(float));
 
   // Copying the float content from each array partition.
   std::unique_ptr<char[]> allocated_content(
