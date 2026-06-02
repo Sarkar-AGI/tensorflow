@@ -627,12 +627,30 @@ size_t TFE_TensorHandleDeviceMemorySize(TFE_TensorHandle* h,
     status->status = absl::InvalidArgumentError("Invalid handle");
     return 0;
   }
+  tensorflow::ImmediateExecutionTensorHandle* unwrapped_handle =
+      tensorflow::unwrap(h);
+  // TODO(b/175427838): It would be nice to be able to use tensorflow::isa here.
+  if (tensorflow::CustomDeviceTensorHandle::classof(unwrapped_handle)) {
+    tensorflow::CustomDeviceTensorHandle* custom_handle =
+        absl::down_cast<tensorflow::CustomDeviceTensorHandle*>(
+            unwrapped_handle);
+    int64_t num_elements;
+    absl::Status s = custom_handle->NumElements(&num_elements);
+    if (!s.ok()) {
+      return 0;
+    }
+    return num_elements * tensorflow::DataTypeSize(custom_handle->DataType());
+  }
+  if (!tensorflow::TensorHandle::classof(unwrapped_handle)) {
+    status->status = absl::InvalidArgumentError("Invalid handle");
+    return 0;
+  }
   tensorflow::TensorHandle* handle =
-      tensorflow::TensorHandleFromInterface(tensorflow::unwrap(h));
+      tensorflow::TensorHandleFromInterface(unwrapped_handle);
   if (handle->Type() != tensorflow::TensorHandle::LOCAL) {
     status->status = absl::InvalidArgumentError(
-        absl::StrCat("TFE_TensorHandleDeviceMemorySize may not be called on a ",
-                     handle->TypeString(), " tensor handle."));
+        "TFE_TensorHandleDeviceMemorySize may not be called on a REMOTE tensor "
+        "handle.");
     return 0;
   }
   const tensorflow::Tensor* tensor;
@@ -878,8 +896,12 @@ void TFE_OpSetAttrValueProto(const TFE_Op* op, const char* attr_name,
         absl::InvalidArgumentError("Got a null or uninitialized `op` argument");
     return;
   }
-  tensorflow::EagerOperation* operation =
-      OperationFromInterface(tensorflow::unwrap(const_cast<TFE_Op*>(op)));
+  tensorflow::ImmediateExecutionOperation* unwrapped_op =
+      tensorflow::unwrap(const_cast<TFE_Op*>(op));
+  if (!tensorflow::EagerOperation::classof(unwrapped_op)) {
+    return;
+  }
+  tensorflow::EagerOperation* operation = OperationFromInterface(unwrapped_op);
   operation->MutableAttrs()->Set(attr_name, attr_value);
 }
 

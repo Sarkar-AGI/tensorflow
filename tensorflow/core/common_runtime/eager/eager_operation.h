@@ -253,7 +253,7 @@ class EagerOperation : public ImmediateExecutionOperation {
 
   // For LLVM style RTTI.
   static bool classof(const AbstractOperation* ptr) {
-    return ptr->getKind() == kEager;
+    return ptr->getKind() == kEager || ptr->getKind() == kTfrt;
   }
 
  private:
