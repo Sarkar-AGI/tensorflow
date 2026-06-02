@@ -163,9 +163,16 @@ MeshProto Mesh::ToProto() const {
   }
   proto.mutable_axes()->Assign(axes.begin(), axes.end());
 
+  // Serialize device IDs.
   std::optional<IotaTileAssignment> iota = device_assignment_.iota();
-  // Only add device ids for non-iota cases.
-  if (!(iota.has_value() && iota->reshape_dims().size() == 1)) {
+  if (iota.has_value() && iota->reshape_dims().size() != 1) {
+    proto.mutable_iota_transform()->mutable_reshape_dims()->Assign(
+        iota->reshape_dims().begin(), iota->reshape_dims().end());
+    for (int elem : iota.value().transpose_perm()) {
+      proto.mutable_iota_transform()->add_transpose_perm(
+          static_cast<int64_t>(elem));
+    }
+  } else if (!iota.has_value()) {
     proto.mutable_device_ids()->Assign(device_assignment_.array().begin(),
                                        device_assignment_.array().end());
   }
@@ -197,6 +204,13 @@ Mesh Mesh::FromProto(const MeshProto& proto) {
 
   // If device ids are not specified, create a mesh with iota tiling.
   if (proto.device_ids_size() == 0) {
+    if (proto.has_iota_transform()) {
+      // Transformed iota.
+      TileAssignment device_assignment = TileAssignment(
+          IotaTileAssignment::Create(mesh_axis_sizes, proto.iota_transform()));
+      return Mesh(device_assignment, mesh_axis_names_span);
+    }
+    // Simple iota.
     TileAssignment device_assignment =
         TileAssignment(IotaTileAssignment::Create(mesh_axis_sizes));
     return Mesh(device_assignment, mesh_axis_names_span);
