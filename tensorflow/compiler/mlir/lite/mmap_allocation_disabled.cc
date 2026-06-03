@@ -27,11 +27,11 @@ MMAPAllocation::MMAPAllocation(int fd, ErrorReporter* error_reporter,
                                bool map_private)
     : MMAPAllocation(error_reporter, -1, map_private) {}
 
-MMAPAllocation::MMAPAllocation(int fd, size_t offset, size_t length,
+MMAPAllocation::MMAPAllocation(int fd, off_t offset, size_t length,
                                ErrorReporter* error_reporter, bool map_private)
     : MMAPAllocation(error_reporter, -1, map_private) {}
 
-MMAPAllocation::MMAPAllocation(const char* filename, size_t offset,
+MMAPAllocation::MMAPAllocation(const char* filename, off_t offset,
                                size_t length, ErrorReporter* error_reporter,
                                bool map_private)
     : MMAPAllocation(error_reporter, -1, map_private) {}

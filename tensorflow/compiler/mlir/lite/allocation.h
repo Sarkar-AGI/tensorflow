@@ -19,7 +19,9 @@ limitations under the License.
 #define TENSORFLOW_COMPILER_MLIR_LITE_ALLOCATION_H_
 
 #include <stddef.h>
+#include <sys/types.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -73,7 +75,7 @@ class MMAPAllocation : public Allocation {
   /// offset and length (both in bytes).
   /// If map_private is true, the mapping is private and writeable. Otherwise,
   /// the mapping is shared and read-only.
-  MMAPAllocation(const char* filename, size_t offset, size_t length,
+  MMAPAllocation(const char* filename, off_t offset, size_t length,
                  ErrorReporter* error_reporter, bool map_private = false);
 
   /// Maps the provided file descriptor to a memory region.
@@ -90,7 +92,7 @@ class MMAPAllocation : public Allocation {
   /// the mapping is shared and read-only.
   /// Note: The provided file descriptor will be dup'ed for usage; the caller
   /// retains ownership of the provided descriptor and should close accordingly.
-  MMAPAllocation(int fd, size_t offset, size_t length,
+  MMAPAllocation(int fd, off_t offset, size_t length,
                  ErrorReporter* error_reporter, bool map_private = false);
 
   ~MMAPAllocation() override;
@@ -108,7 +110,7 @@ class MMAPAllocation : public Allocation {
   size_t mmapped_buffer_size() const { return bytes() + offset_in_buffer_; }
 
   // Offset of mmapped_buffer() in the file referenced by the file descriptor.
-  size_t mmapped_buffer_offset_in_file() const {
+  off_t mmapped_buffer_offset_in_file() const {
     return offset_of_buffer_in_file_;
   }
 
@@ -121,7 +123,7 @@ class MMAPAllocation : public Allocation {
   size_t buffer_size_bytes_ = 0;
   // Used when the address to mmap is not page-aligned.
   size_t offset_in_buffer_ = 0;
-  size_t offset_of_buffer_in_file_ = 0;
+  off_t offset_of_buffer_in_file_ = 0;
 
  private:
   // Assumes ownership of the provided `owned_fd` instance.
@@ -129,8 +131,8 @@ class MMAPAllocation : public Allocation {
 
   // Assumes ownership of the provided `owned_fd` instance, and uses the given
   // offset and length (both in bytes) for memory mapping.
-  MMAPAllocation(ErrorReporter* error_reporter, int owned_fd, size_t offset,
-                 size_t length, bool map_private);
+  MMAPAllocation(ErrorReporter* error_reporter, int owned_fd, uint64_t offset,
+                 uint64_t length, bool map_private);
 };
 
 class FileCopyAllocation : public Allocation {
