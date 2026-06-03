@@ -19,6 +19,9 @@ limitations under the License.
 
 #include "tensorflow/core/kernels/in_topk_op.h"
 
+#include <cstdint>
+#include <limits>
+
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_shape.h"
@@ -66,6 +69,13 @@ class InTopK : public OpKernel {
             "First dimension of predictions ", predictions_in.dim_size(0),
             " must match length of targets ", targets_in.dim_size(0))));
 
+    OP_REQUIRES(
+        context,
+        predictions_in.dim_size(0) * predictions_in.dim_size(1) <
+            std::numeric_limits<int32_t>::max(),
+        absl::InvalidArgumentError(
+            "Number of targets * number of classes must be less than INT_MAX"));
+
     const auto predictions = predictions_in.matrix<T>();
     const auto targets = targets_in.vec<TARGET_T>();
 
@@ -83,7 +93,7 @@ class InTopK : public OpKernel {
   }
 
  private:
-  int k_;
+  int64_t k_;
 };
 
 REGISTER_KERNEL_BUILDER(Name("InTopK")
