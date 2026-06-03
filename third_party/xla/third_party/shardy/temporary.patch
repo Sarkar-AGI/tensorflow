@@ -1,15 +1,118 @@
+diff --git a/shardy/dialect/mpmd/ir/fragment_execution_rules.h b/shardy/dialect/mpmd/ir/fragment_execution_rules.h
+index e340c6a5..9d1a2088 100644
+--- a/shardy/dialect/mpmd/ir/fragment_execution_rules.h
++++ b/shardy/dialect/mpmd/ir/fragment_execution_rules.h
+@@ -158,14 +158,6 @@ struct FragmentInfoMapInfo : public DenseMapInfo<FragmentInfo> {
+                         /*split_type=*/std::nullopt,
+                         /*mesh_name=*/""};
+   }
+-
+-  static inline FragmentInfo getTombstoneKey() {
+-    return FragmentInfo{/*origins=*/{},
+-                        /*stage_id=*/DenseMapInfo<int>::getTombstoneKey(),
+-                        /*call_counter=*/DenseMapInfo<int>::getTombstoneKey(),
+-                        /*split_type=*/SplitFragmentType::kDropTransferred,
+-                        /*mesh_name=*/"__tombstone__"};
+-  }
+ };
+ 
+ // Describes a rule to merge fragments. A rule is defined by a list of sources
+diff --git a/shardy/dialect/mpmd/ir/fragment_execution_rules_test.cc b/shardy/dialect/mpmd/ir/fragment_execution_rules_test.cc
+index 2a81bda6..19a7d1ba 100644
+--- a/shardy/dialect/mpmd/ir/fragment_execution_rules_test.cc
++++ b/shardy/dialect/mpmd/ir/fragment_execution_rules_test.cc
+@@ -470,12 +470,9 @@ TEST(FragmentInfoMapInfoTest, GetHashValue) {
+ 
+ TEST(FragmentInfoMapInfoTest, SpecialKeys) {
+   FragmentInfo emptyKey = FragmentInfoMapInfo::getEmptyKey();
+-  FragmentInfo tombstoneKey = FragmentInfoMapInfo::getTombstoneKey();
+   FragmentInfo info1 = MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, "m1");
+ 
+   EXPECT_FALSE(FragmentInfoMapInfo::isEqual(emptyKey, info1));
+-  EXPECT_FALSE(FragmentInfoMapInfo::isEqual(tombstoneKey, info1));
+-  EXPECT_FALSE(FragmentInfoMapInfo::isEqual(emptyKey, tombstoneKey));
+ }
+ 
+ TEST(FragmentInfoMapInfoTest, DenseMapIntegration) {
+diff --git a/shardy/dialect/mpmd/transforms/export/lower_to_fragment_calls.cc b/shardy/dialect/mpmd/transforms/export/lower_to_fragment_calls.cc
+index c03222a8..7f8ebe63 100644
+--- a/shardy/dialect/mpmd/transforms/export/lower_to_fragment_calls.cc
++++ b/shardy/dialect/mpmd/transforms/export/lower_to_fragment_calls.cc
+@@ -121,8 +121,7 @@ struct FragmentBodyEquivalenceBaseInfo : public DenseMapInfo<FragmentOp> {
+     if (lhs == rhs) {
+       return true;
+     }
+-    if (lhs == getTombstoneKey() || lhs == getEmptyKey() ||
+-        rhs == getTombstoneKey() || rhs == getEmptyKey()) {
++    if (lhs == getEmptyKey() || rhs == getEmptyKey()) {
+       return false;
+     }
+ 
+diff --git a/shardy/dialect/sdy/ir/axis_list_ref.h b/shardy/dialect/sdy/ir/axis_list_ref.h
+index 8a4f3776..e8dc0ee6 100644
+--- a/shardy/dialect/sdy/ir/axis_list_ref.h
++++ b/shardy/dialect/sdy/ir/axis_list_ref.h
+@@ -195,12 +195,6 @@ struct AxisListRefInfo : public llvm::DenseMapInfo<AxisListRef> {
+   }
+ 
+   static inline AxisListRef getEmptyKey() { return AxisListRef(); }
+-
+-  static inline AxisListRef getTombstoneKey() {
+-    return AxisListRef(
+-        /*axisRefs=*/DenseMapInfo<ArrayRef<AxisRefAttr>>::getTombstoneKey(),
+-        /*tailAxisRef=*/AxisRefAttr());
+-  }
+ };
+ 
+ }  // namespace sdy
+diff --git a/shardy/dialect/sdy/transforms/export/explicit_reshards_util.cc b/shardy/dialect/sdy/transforms/export/explicit_reshards_util.cc
+index 44fd5f3b..8e14538c 100644
+--- a/shardy/dialect/sdy/transforms/export/explicit_reshards_util.cc
++++ b/shardy/dialect/sdy/transforms/export/explicit_reshards_util.cc
+@@ -244,9 +244,6 @@ struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
+ 
+   static inline FactorAxesPair getEmptyKey() { return FactorAxesPair(); }
+ 
+-  static inline FactorAxesPair getTombstoneKey() {
+-    return FactorAxesPair(FactorAxesPair::kTombstoneFactorIndex);
+-  }
+ };
+ 
+ struct FactorAxesCandidate {
 diff --git a/third_party/llvm/workspace.bzl b/third_party/llvm/workspace.bzl
-index 296f1173..dbff0d63 100644
+index dbff0d63..2b0891b1 100644
 --- a/third_party/llvm/workspace.bzl
 +++ b/third_party/llvm/workspace.bzl
 @@ -4,8 +4,8 @@ load("//third_party:repo.bzl", "tf_http_archive")
  
  def repo(name):
      """Imports LLVM."""
--    LLVM_COMMIT = "56c9a2c796661fd8b2ca627ce1f39cb3e97a203f"
--    LLVM_SHA256 = "e2dc0d8c39b240c24c9a53c324b1c96dc79ca6459c9b758b96dceec6b091004c"
-+    LLVM_COMMIT = "11158cfe3faa2c9c04c8b5fdac3ac25eec75cb51"
-+    LLVM_SHA256 = "de019fab5a787b0219d86b9c5cbd1436c9848ae61609cfee22a5d0046c4ff652"
+-    LLVM_COMMIT = "11158cfe3faa2c9c04c8b5fdac3ac25eec75cb51"
+-    LLVM_SHA256 = "de019fab5a787b0219d86b9c5cbd1436c9848ae61609cfee22a5d0046c4ff652"
++    LLVM_COMMIT = "d59899763f0df2bf16fca98ab11421646957602a"
++    LLVM_SHA256 = "9779922e6bb5f2d9c8644d1b1b4309fc2aab81b51a4ab2372471f4c6eb7c87fb"
  
      tf_http_archive(
          name = name,
+diff --git a/third_party/stablehlo/temporary.patch b/third_party/stablehlo/temporary.patch
+index 911957b5..f06e588a 100644
+--- a/third_party/stablehlo/temporary.patch
++++ b/third_party/stablehlo/temporary.patch
+@@ -230,6 +230,17 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.cpp b/stablehlo/stablehlo/
+  }
+  
+  LogicalResult AllReduceOp::inferReturnTypeComponents(
++@@ -3724,10 +3770,6 @@
++     return NonSpatialDim(DenseMapInfo<int64_t>::getEmptyKey());
++   }
++ 
++-  static inline NonSpatialDim getTombstoneKey() {
++-    return NonSpatialDim(DenseMapInfo<int64_t>::getTombstoneKey());
++-  }
++-
++   static unsigned getHashValue(const NonSpatialDim& key) {
++     return DenseMapInfo<int64_t>::getHashValue(key);
++   }
+ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/dialect/StablehloOps.td
+ --- stablehlo/stablehlo/dialect/StablehloOps.td
+ +++ stablehlo/stablehlo/dialect/StablehloOps.td
