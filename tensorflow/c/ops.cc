@@ -54,7 +54,9 @@ void TF_OpDefinitionBuilderAddOutput(TF_OpDefinitionBuilder* builder,
 #define DEFINE_BUILDER_BOOL_SETTER(func_name)                             \
   void TF_OpDefinitionBuilder##func_name(TF_OpDefinitionBuilder* builder, \
                                          bool arg_name) {                 \
-    reinterpret_cast<OpDefBuilder*>(builder)->func_name();                \
+    if (arg_name) {                                                       \
+      reinterpret_cast<OpDefBuilder*>(builder)->func_name();              \
+    }                                                                     \
   }
 
 DEFINE_BUILDER_BOOL_SETTER(SetIsCommutative)
@@ -228,14 +230,19 @@ void TF_ShapeInferenceContextDim(TF_ShapeInferenceContext* ctx,
                                  TF_ShapeHandle* shape_handle, int64_t i,
                                  TF_DimensionHandle* result) {
   int64_t rank = TF_ShapeInferenceContextRank(ctx, shape_handle);
+  auto* cc_ctx = reinterpret_cast<InferenceContext*>(ctx);
   auto* cc_result = reinterpret_cast<DimensionHandle*>(result);
+
+  if (rank == InferenceContext::kUnknownRank) {
+    *cc_result = cc_ctx->UnknownDim();
+    return;
+  }
 
   if (i < -rank || i >= rank) {
     *cc_result = DimensionHandle();
     return;
   }
 
-  auto* cc_ctx = reinterpret_cast<InferenceContext*>(ctx);
   auto* cc_shape_handle = reinterpret_cast<ShapeHandle*>(shape_handle);
   *cc_result = cc_ctx->Dim(*cc_shape_handle, i);
 }
