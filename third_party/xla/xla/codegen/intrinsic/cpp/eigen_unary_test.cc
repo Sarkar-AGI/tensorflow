@@ -26,8 +26,10 @@ limitations under the License.
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Support/raw_ostream.h"
 #include "xla/codegen/intrinsic/cpp/cpp_gen_intrinsics.h"
-#include "xla/codegen/intrinsic/cpp/eigen_unary_ll.h"
+#include "xla/codegen/intrinsic/cpp/eigen_unary_32_ll.h"
+#include "xla/codegen/intrinsic/cpp/eigen_unary_64_ll.h"
 #include "xla/codegen/intrinsic/cpp/vector_ops.h"
+#include "xla/codegen/intrinsic/intrinsic.h"
 #include "xla/codegen/intrinsic/test_matchers.h"
 
 namespace xla::codegen {
@@ -98,10 +100,28 @@ TEST(EigenUnaryTest, v8f64TanhIsCorrect) {
   }
 }
 
-TEST(EigenUnaryTest, FastTanhfIsVectorized) {
+TEST(EigenUnaryTest, FastTanhfIsVectorized32) {
   llvm::LLVMContext context;
   std::unique_ptr<llvm::Module> module =
-      ParseEmbeddedBitcode(context, llvm_ir::kEigenUnaryLlIr);
+      ParseEmbeddedBitcode(context, llvm_ir::kEigenUnary32LlIr);
+
+  std::string ir;
+  llvm::raw_string_ostream stream(ir);
+  module->print(stream, nullptr);
+
+  EXPECT_THAT(ir, ContainsRegex("fmul <8 x float>"));
+  EXPECT_THAT(ir, ContainsRegex("fmul <4 x double>"));
+  EXPECT_THAT(ir, ContainsRegex("<8 x float>.*f0x326F951E"));
+  EXPECT_THAT(ir, Not(ContainsRegex("llvm.x86")));
+  EXPECT_THAT(ir, Not(ContainsRegex("llvm.aarch64")));
+  EXPECT_THAT(ir, ContainsRegex("xla.unused.tanh.v16f32"));
+  EXPECT_THAT(ir, ContainsRegex("xla.unused.tanh.v8f64"));
+}
+
+TEST(EigenUnaryTest, FastTanhfIsVectorized64) {
+  llvm::LLVMContext context;
+  std::unique_ptr<llvm::Module> module =
+      ParseEmbeddedBitcode(context, llvm_ir::kEigenUnary64LlIr);
 
   std::string ir;
   llvm::raw_string_ostream stream(ir);
@@ -114,6 +134,14 @@ TEST(EigenUnaryTest, FastTanhfIsVectorized) {
   EXPECT_THAT(ir, Not(ContainsRegex("llvm.aarch64")));
   EXPECT_THAT(ir, ContainsRegex("xla.unused.tanh.v16f32"));
   EXPECT_THAT(ir, ContainsRegex("xla.unused.tanh.v8f64"));
+}
+
+TEST(EigenUnaryTest, GetCppGenIrStringSelectsCorrectVectorWidth) {
+  intrinsics::IntrinsicOptions options_default;
+  EXPECT_EQ(GetCppGenIrString(options_default), llvm_ir::kEigenUnary32LlIr);
+
+  options_default.features = "+avx512f";
+  EXPECT_EQ(GetCppGenIrString(options_default), llvm_ir::kEigenUnary64LlIr);
 }
 
 }  // namespace
