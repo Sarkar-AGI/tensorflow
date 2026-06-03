@@ -32,8 +32,8 @@ namespace tflite {
 
 template <int N>
 struct Dims {
-  int sizes[N];
-  int strides[N];
+  int64_t sizes[N];
+  int64_t strides[N];
 };
 
 class RuntimeShape {
@@ -347,7 +347,8 @@ inline tflite::Dims<4> ToRuntimeDims(const tflite::RuntimeShape& array_shape) {
 // TODO(b/80418076): Move to legacy ops file, update invocations.
 inline RuntimeShape DimsToShape(const tflite::Dims<4>& dims) {
   return RuntimeShape(
-      {dims.sizes[3], dims.sizes[2], dims.sizes[1], dims.sizes[0]});
+      {static_cast<int>(dims.sizes[3]), static_cast<int>(dims.sizes[2]),
+       static_cast<int>(dims.sizes[1]), static_cast<int>(dims.sizes[0])});
 }
 #endif  // TF_LITE_STATIC_MEMORY
 

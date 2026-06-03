@@ -38,7 +38,8 @@ static constexpr int kDepthwiseReverseShift = -1;
 
 inline void ShapeFromDims(const tflite::Dims<4>& dims, RuntimeShape* shape) {
   shape->BuildFrom(
-      {dims.sizes[3], dims.sizes[2], dims.sizes[1], dims.sizes[0]});
+      {static_cast<int>(dims.sizes[3]), static_cast<int>(dims.sizes[2]),
+       static_cast<int>(dims.sizes[1]), static_cast<int>(dims.sizes[0])});
 }
 
 inline void DepthwiseConv(const float* input_data, const Dims<4>& input_dims,
@@ -2121,8 +2122,9 @@ void ArgMax(const T3* axis, const T1* input_data,
             const tflite::Dims<4>& output_dims) {
   // Assumes the input always has 4 dimensions, and therefore,
   // output always has three dimensions.
-  auto output_shape = RuntimeShape(
-      {output_dims.sizes[2], output_dims.sizes[1], output_dims.sizes[0]});
+  auto output_shape = RuntimeShape({static_cast<int>(output_dims.sizes[2]),
+                                    static_cast<int>(output_dims.sizes[1]),
+                                    static_cast<int>(output_dims.sizes[0])});
   // Another way to interpret this is that output_dims.sizes[4] is always 1.
   TFLITE_DCHECK_EQ(output_shape.FlatSize(),
                    DimsToShape(output_dims).FlatSize());
