@@ -18,8 +18,8 @@ if [[ "$TFCI_GITHUB_ACTIONS" == "true" ]]; then
 fi
 TFCI_DOCKER_PULL_ENABLE=1
 TFCI_DOCKER_IMAGE="us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build-windows@sha256:023fa901fda70be8890b05689d0a667287692c1f59d0abe4add7208ec5a12707"
-TFCI_BAZEL_BAZELRC_ARGS="--output_user_root=C:/x"
-TFCI_BAZEL_COMMON_ARGS="--repo_env=HERMETIC_PYTHON_VERSION=$TFCI_PYTHON_VERSION --repo_env=USE_PYWRAP_RULES=True --config=windows_x86_cpu_2022"
+TFCI_BAZEL_BAZELRC_ARGS="--output_user_root=C:/x_clean_absl"
+TFCI_BAZEL_COMMON_ARGS="--repo_env=HERMETIC_PYTHON_VERSION=$TFCI_PYTHON_VERSION --repo_env=USE_PYWRAP_RULES=True --config=windows_x86_cpu_2022 --noremote_accept_cached"
 
 # For RBE, we explicitly set invalid paths to force the auto-configuration to fail.
 TFCI_BAZEL_VC="C:/RBE_ISOLATED_INVALID_PATH"
