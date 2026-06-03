@@ -14,7 +14,6 @@
 # ==============================================================================
 
 """Platform-specific code for checking the integrity of the TensorFlow build."""
-import ctypes
 import os
 
 MSVCP_DLL_NAMES = "msvcp_dll_names"
@@ -42,9 +41,12 @@ def preload_check():
     if MSVCP_DLL_NAMES in build_info.build_info:
       missing = []
       for dll_name in build_info.build_info[MSVCP_DLL_NAMES].split(","):
-        try:
-          ctypes.WinDLL(dll_name)
-        except OSError:
+        found = False
+        for path_dir in os.environ.get("PATH", "").split(";"):
+          if os.path.isfile(os.path.join(path_dir, dll_name)):
+            found = True
+            break
+        if not found:
           missing.append(dll_name)
       if missing:
         raise ImportError(
@@ -62,3 +64,5 @@ def preload_check():
     # SIGILL).
     from tensorflow.python.platform import _pywrap_cpu_feature_guard
     _pywrap_cpu_feature_guard.InfoAboutUnusedCPUFeatures()
+
+
