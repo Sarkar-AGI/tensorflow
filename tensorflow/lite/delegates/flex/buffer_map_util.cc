@@ -19,12 +19,14 @@ limitations under the License.
 #include <cstring>
 #include <utility>
 
+#include "absl/status/status.h"
 #include "tensorflow/c/tf_tensor_internal.h"
 #include "tensorflow/core/framework/log_memory.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/typed_allocator.h"
 #include "tensorflow/core/framework/types.pb.h"
 #include "tensorflow/lite/c/c_api_types.h"
+#include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/delegates/flex/util.h"
 #include "tensorflow/lite/string_util.h"
 
@@ -154,6 +156,12 @@ absl::Status SetTfTensorFromTfLite(const TfLiteTensor* tensor,
     *tf_tensor = t;
     return absl::OkStatus();
   } else if (IsResourceOrVariant(tensor)) {
+    if (tensor->allocation_type == kTfLiteMmapRo ||
+        (!tensor->data_is_stale && tensor->delegate == nullptr)) {
+      return absl::InvalidArgumentError(  // NOLINT
+          "Input tensor has resource or variant type but contains "
+          "invalid data.");
+    }
     // TODO(b/179094265): This is an experimental implementation, subject to
     // change. This can be re-implemented with life cycle management mechanism
     // like reference counting.
